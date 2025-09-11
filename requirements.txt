@@ -1,0 +1,8 @@
+openai
+langchain
+streamlit
+tiktoken
+langchain_community
+python_dotenv
+llama-cpp-python==0.2.11
+dashscope
