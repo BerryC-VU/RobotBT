@@ -1,46 +1,96 @@
 import streamlit as st
-from chat_engine import create_chat_engine
-from bt_extractor import extract_bt_from_description
-import re
+from chat_engine import generate_behavior_tree, modify_behavior_tree, chat_reply
 
-def extract_bt_xml(text: str):
-    """从模型回复中提取 <root>...</root> 的 XML 内容"""
-    match = re.search(r"<root>.*?</root>", text, re.DOTALL)
-    return match.group(0) if match else text
-
-st.set_page_config(page_title="Behavior Tree ChatBot", layout="centered", page_icon="🤖")
-
-st.title("🧠 Behavior Tree Extractor ChatBot")
-st.markdown("Please enter your robot mission description, I'll extract the key components into an XML formated behavior tree.")
+st.markdown("## 🧠 Behavior Tree Extractor ChatBot")
+# st.markdown("Please enter your robot mission description, I'll extract the key components into an XML formated behavior tree.")
 
 
-if "chat_engine" not in st.session_state:
-    st.session_state.chat_engine = create_chat_engine()
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
+if "last_xml" not in st.session_state:
+    st.session_state["last_xml"] = ""
+if "mode" not in st.session_state:
+    st.session_state["mode"] = "Chat"
 
+GEN_KWS = ["generate bt", "generate behavior tree", "extract bt", "extract behavior tree"]
+MOD_KWS = ["modify", "update", "edit", "change", "delete"]
+
+
+def detect_mode(s: str) -> str:
+    s_low = s.lower()
+    if any(k in s_low for k in GEN_KWS):
+        return "generate"
+    if any(k in s_low for k in MOD_KWS):
+        return "modify"
+    return "chat"
+
+
+for msg in st.session_state["messages"]:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
 user_input = st.chat_input("Please enter your input...")
 
-if user_input:
-    with st.spinner("Generating Behavior Tree..."):
-        try:
-            response = extract_bt_from_description(
-                st.session_state.chat_engine,
-                user_input
-            )
-            with st.chat_message("user"):
-                st.markdown(user_input)
+if "mode" not in st.session_state:
+    st.session_state["mode"] = "Chat"
+if "pending_mode" not in st.session_state:
+    st.session_state["pending_mode"] = st.session_state["mode"]
 
-            with st.chat_message("assistant"):
-                # st.code(response, language="xml")
-                clean_result = extract_bt_xml(response)
-                print("This is the cleaned result; \n")
-                print(clean_result)
-                clean_result = clean_result.replace("\\n", "\n")
-                st.code(clean_result, language="xml")
+col1, col2, col3, col4 = st.columns([3, 1.75, 1.75, 1.5])
+with col1:
+    st.write(f"👉 Current mode: **{st.session_state['mode']}**")
+with col2:
+    if st.button("Generate BT"):
+        st.session_state["pending_mode"] = "Generate BT"
+with col3:
+    if st.button("Modification"):
+        st.session_state["pending_mode"] = "Modification"
+with col4:
+    if st.button("Chat"):
+        st.session_state["pending_mode"] = "Chat"
+if st.session_state["pending_mode"] != st.session_state["mode"]:
+    st.session_state["mode"] = st.session_state["pending_mode"]
+    st.rerun()
+
+if user_input:
+    with st.chat_message("user"):
+        st.markdown(user_input)
+    st.session_state["messages"].append({"role": "user", "content": user_input})
+
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        placeholder.markdown("⏳ Processing...")
+
+        if st.session_state["mode"] == "Chat":
+            mode = detect_mode(user_input)
+        else:
+            mode = st.session_state["mode"]
+
+        try:
+            print("mode is: ", mode)
+            if mode == "Generate BT":
+                bt_xml = generate_behavior_tree(user_input)
+                st.session_state["last_xml"] = bt_xml
+                st.session_state["messages"].append({"role": "assistant", "content": bt_xml})
+
+            elif mode == "Modification":
+                if st.session_state["last_xml"]:
+                    modified_xml = modify_behavior_tree(st.session_state["last_xml"], user_input)
+                    st.session_state["last_xml"] = modified_xml
+                    st.session_state["messages"].append({"role": "assistant", "content": modified_xml})
+                else:
+                    st.session_state["messages"].append(
+                        {"role": "assistant", "content": "⚠️ Please generate a BT first before modifying."})
+
+            else:
+                reply = chat_reply(user_input)
+                st.session_state["messages"].append({"role": "assistant", "content": reply})
 
         except Exception as e:
-            with st.chat_message("user"):
-                st.markdown(user_input)
+            placeholder.error(f"❌ Error: {e}")
+            st.session_state["messages"].append({"role": "assistant", "content": f'❌ Error: {e}'})
 
-            with st.chat_message("assistant"):
-                st.error(f"❌ Error：{e}")
+    st.rerun()
+
+else:
+    st.empty()
