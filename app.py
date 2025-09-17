@@ -1,5 +1,7 @@
 import streamlit as st
 from chat_engine import generate_behavior_tree, modify_behavior_tree, chat_reply
+import time
+from datetime import datetime
 
 st.markdown("## 🧠 Behavior Tree Extractor ChatBot")
 # st.markdown("Please enter your robot mission description, I'll extract the key components into an XML formated behavior tree.")
@@ -56,6 +58,7 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
     st.session_state["messages"].append({"role": "user", "content": user_input})
+    start_time = time.time()
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
@@ -70,14 +73,26 @@ if user_input:
             print("mode is: ", mode)
             if mode == "Generate BT":
                 bt_xml = generate_behavior_tree(user_input)
+                end_time = time.time()
+                processing_time = end_time - start_time
+
                 st.session_state["last_xml"] = bt_xml
-                st.session_state["messages"].append({"role": "assistant", "content": bt_xml})
+                st.session_state["messages"].append({
+                    "role": "assistant",
+                    "content": bt_xml + f"\n\n`⏱ Processing time: {processing_time:.2f} seconds`"
+                })
 
             elif mode == "Modification":
                 if st.session_state["last_xml"]:
                     modified_xml = modify_behavior_tree(st.session_state["last_xml"], user_input)
+                    end_time = time.time()
+                    processing_time = end_time - start_time
+
                     st.session_state["last_xml"] = modified_xml
-                    st.session_state["messages"].append({"role": "assistant", "content": modified_xml})
+                    st.session_state["messages"].append({
+                        "role": "assistant",
+                        "content": modified_xml + f"\n\n`⏱ Processing time: {processing_time:.2f} seconds`"
+                    })
                 else:
                     st.session_state["messages"].append(
                         {"role": "assistant", "content": "⚠️ Please generate a BT first before modifying."})
