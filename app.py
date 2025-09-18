@@ -1,10 +1,12 @@
 import streamlit as st
 from chat_engine import generate_behavior_tree, modify_behavior_tree, chat_reply
 import time
-from datetime import datetime
+from chat_engine import store
 
 st.markdown("## 🧠 Behavior Tree Extractor ChatBot")
-# st.markdown("Please enter your robot mission description, I'll extract the key components into an XML formated behavior tree.")
+
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = "default"
 
 
 if "messages" not in st.session_state:
@@ -38,7 +40,7 @@ if "mode" not in st.session_state:
 if "pending_mode" not in st.session_state:
     st.session_state["pending_mode"] = st.session_state["mode"]
 
-col1, col2, col3, col4 = st.columns([3, 1.75, 1.75, 1.5])
+col1, col2, col3, col4, col5 = st.columns([3, 1.75, 1.75, 1, 1.5])
 with col1:
     st.write(f"👉 Current mode: **{st.session_state['mode']}**")
 with col2:
@@ -50,6 +52,17 @@ with col3:
 with col4:
     if st.button("Chat"):
         st.session_state["pending_mode"] = "Chat"
+with col5:
+    if st.button("ClearALL"):
+        st.session_state["pending_mode"] = "ClearALL"
+        if st.session_state["session_id"] in store:
+            store.pop(st.session_state["session_id"])
+        st.session_state["messages"] = []
+        st.session_state["last_xml"] = ""
+        st.session_state["pending_mode"] = "Chat"
+        st.success("Memory and messages cleared.")
+        st.rerun()
+
 if st.session_state["pending_mode"] != st.session_state["mode"]:
     st.session_state["mode"] = st.session_state["pending_mode"]
     st.rerun()
@@ -72,7 +85,9 @@ if user_input:
         try:
             print("mode is: ", mode)
             if mode == "Generate BT":
-                bt_xml = generate_behavior_tree(user_input)
+                bt_xml = generate_behavior_tree(user_input,
+                                                session_id=st.session_state["session_id"]
+                                                )
                 end_time = time.time()
                 processing_time = end_time - start_time
 
@@ -84,7 +99,10 @@ if user_input:
 
             elif mode == "Modification":
                 if st.session_state["last_xml"]:
-                    modified_xml = modify_behavior_tree(st.session_state["last_xml"], user_input)
+                    modified_xml = modify_behavior_tree(st.session_state["last_xml"],
+                                                        user_input,
+                                                        session_id=st.session_state["session_id"]
+                                                        )
                     end_time = time.time()
                     processing_time = end_time - start_time
 
@@ -98,7 +116,7 @@ if user_input:
                         {"role": "assistant", "content": "⚠️ Please generate a BT first before modifying."})
 
             else:
-                reply = chat_reply(user_input)
+                reply = chat_reply(user_input, session_id=st.session_state["session_id"])
                 st.session_state["messages"].append({"role": "assistant", "content": reply})
 
         except Exception as e:
