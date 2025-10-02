@@ -1,18 +1,35 @@
-import streamlit as st
-from chat_engine import generate_behavior_tree, modify_behavior_tree, chat_reply
 import time
-from chat_engine import store
+import pandas as pd
+import streamlit as st
 
-st.markdown("## 🧠 Behavior Tree Extractor ChatBot")
+from chat_engine_a import generate_behavior_tree, generate_behavior_tree_from_series, modify_behavior_tree, chat_reply
+from chat_engine_a import store
 
+
+st.set_page_config(page_title="RobotBT", page_icon="🤖", layout="wide")
+
+# ---------- State ----------
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = "default"
 
-
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
-if "last_xml" not in st.session_state:
-    st.session_state["last_xml"] = ""
+
+if "last_bt_xml" not in st.session_state:
+    st.session_state["last_bt_xml"] = None
+
+if "last_pt" not in st.session_state:
+    st.session_state["last_pt"] = 0.0
+
+if "csv_df" not in st.session_state:
+    st.session_state["csv_df"] = None
+
+if "csv_selected_index" not in st.session_state:
+    st.session_state["csv_selected_index"] = None
+
+if "csv_selected_row" not in st.session_state:
+    st.session_state["csv_selected_row"] = None
+
 if "mode" not in st.session_state:
     st.session_state["mode"] = "Chat"
 
@@ -29,11 +46,62 @@ def detect_mode(s: str) -> str:
     return "chat"
 
 
-for msg in st.session_state["messages"]:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+st.markdown("## 🤖 RobotBT")
 
-user_input = st.chat_input("Please enter your input...")
+
+# ---------- CSV Upload & Row Selection ----------
+with st.expander("📄 Upload CSV & Generate from a row", expanded=True):
+    csv_file = st.file_uploader("Upload CSV (use your template)", type=["csv"], key="csv_uploader_single")
+
+    if csv_file is not None:
+        try:
+            df = pd.read_csv(csv_file)
+        except Exception as e:
+            st.error(f"Failed to read CSV: {e}")
+
+        st.session_state["csv_df"] = df
+        st.success(f"Loaded CSV file: {df.shape[0]} rows, {df.shape[1]} columns")
+
+        if len(df) > 0:
+            name_col_exemplars = [c for c in df.columns if "name of the exemplar" in c.lower()]
+            label_col = name_col_exemplars[0] if name_col_exemplars else None
+
+            if label_col:
+                choices = [f"[{i}] {str(df.iloc[i][label_col])}" for i in range(len(df))]
+            else:
+                choices = [f"[{i}] row {i}" for i in range(len(df))]
+
+            row_idx = st.selectbox("Select a row", options=list(range(len(choices))),
+                                   format_func=lambda i: choices[i]) if len(choices) else None
+
+            if row_idx is not None:
+                st.dataframe(df.iloc[[row_idx]])
+
+            gen_bt_with_all = st.button("🚀 Generate BT from CSV row")
+            if gen_bt_with_all and row_idx is not None:
+                start_time = time.time()
+                row = df.iloc[row_idx]
+                with st.spinner("Generating behavior tree from CSV row..."):
+                    try:
+                        bt_xml = generate_behavior_tree_from_series(row, session_id=st.session_state["session_id"])
+                        end_time = time.time()
+                        processing_time = end_time - start_time
+                        st.session_state["last_pt"] = processing_time
+                        st.session_state["last_xml"] = bt_xml
+                        st.session_state["messages"].append({
+                            "role": "assistant",
+                            "content": bt_xml + f"\n\n`⏱ Processing time: {processing_time:.2f} seconds`"
+                        })
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+result_container = st.container()
+with result_container:
+    for msg in st.session_state["messages"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
 
 if "mode" not in st.session_state:
     st.session_state["mode"] = "Chat"
@@ -66,6 +134,9 @@ with col5:
 if st.session_state["pending_mode"] != st.session_state["mode"]:
     st.session_state["mode"] = st.session_state["pending_mode"]
     st.rerun()
+
+# Chat input
+user_input = st.chat_input("Please enter your input...")
 
 if user_input:
     with st.chat_message("user"):
