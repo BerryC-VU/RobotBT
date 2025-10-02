@@ -2,24 +2,11 @@ import os
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.chat_models import ChatTongyi
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.chat_history import InMemoryChatMessageHistory
 
 import pandas as pd
 
 load_dotenv()
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
-
-
-store = {}
-
-
-def get_session_history(session_id: str) -> BaseChatMessageHistory:
-    if session_id not in store:
-        store[session_id] = InMemoryChatMessageHistory()
-    return store[session_id]
-
 
 # LLM
 llm = ChatTongyi(model="qwen-max")
@@ -31,7 +18,6 @@ Please extract the key behavior tree nodes (actions, conditions, sequences, sele
 from the following scenario description. Then, format and return ONLY the entire behavior tree
 into a proper BTCPP_format 4 BT XML format. Do NOT include explanations or structured lists.
 Return ONLY the XML inside."""),
-    ("placeholder", "{history}"),
     ("user", "{description}")
 ])
 
@@ -41,17 +27,7 @@ mod_bt_prompt = ChatPromptTemplate.from_messages([
 The user will give you an existing BT (in XML) and a modification request.
 You must update the XML accordingly and return ONLY the full modified BT in BTCPP_format 4 XML.
 Do NOT include explanations or comments. Output only valid XML."""),
-    ("placeholder", "{history}"),
     ("user", "Existing BT:\n{last_xml}\n\nModification request:\n{instruction}")
-])
-
-
-chat_prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a helpful assistant for general conversation. 
-Keep your answers short, concise, and directly relevant to the user's request. 
-Do not provide long explanations unless explicitly asked."""),
-    ("placeholder", "{history}"),
-    ("user", "{message}")
 ])
 
 
@@ -65,11 +41,9 @@ def parse_series_to_requirements(row_data):
             "adaptation_goals": []
         }
 
-        # Mission description
+        # Get mission description
         description_col = "Description (the textual description of the robotic mission)"
         requirements["mission_description"] = row_data[description_col]
-        # if description_col in row_data.index and pd.notna(row_data[description_col]):
-        #     requirements["mission_description"] = row_data[description_col]
 
         # Technical capabilities
         tech_cols = ["Robot Features", "Technical Capabilities"]
@@ -163,6 +137,7 @@ ROBUSTNESS REQUIREMENTS:
 
     return "\n".join(prompt_parts)
 
+
 series_bt_prompt = ChatPromptTemplate.from_messages([
     ("system", """You are a robotics behavior tree expert specializing in creating robust, adaptive systems.
 
@@ -176,7 +151,7 @@ Based on the comprehensive requirements provided, generate a behavior tree that:
 
 KEY ROBUSTNESS PATTERNS TO APPLY:
 - Sensing/Perception failures: Retry 3x → Notify operator → Manual input
-- Authorization failures: Check authorization → Wait for authorization → Escalate to supervisor
+- Authorization failures: Check authorization → Wait for auth → Escalate to supervisor
 - Time compliance: Track time → Check compliance → Record violations
 - Physical operation failures: Retry → Switch to manual mode → Notify operator
 - Security operations: Validate security context → Secure action → Secure logging
@@ -184,31 +159,19 @@ KEY ROBUSTNESS PATTERNS TO APPLY:
 
 Return ONLY the complete behavior tree in BTCPP_format 4 XML format.
 Do NOT include explanations or comments."""),
-    ("placeholder", "{history}"),
     ("user", "{requirements}")
 ])
 
 
-def generate_behavior_tree_from_series(row: "pd.Series", session_id: str = "default") -> str:
+def generate_behavior_tree_from_series(row: "pd.Series") -> str:
     requirements = parse_series_to_requirements(row)
     if "error" in requirements:
         return f"Error: {requirements['error']}"
 
     requirements_text = format_requirements_prompt(requirements)
 
-    chain_with_history = RunnableWithMessageHistory(
-        series_bt_prompt | llm,
-        get_session_history,
-        input_messages_key="requirements",
-        history_messages_key="history",
-    )
-
-    response = chain_with_history.invoke(
-        {"requirements": requirements_text},
-        config={"configurable": {"session_id": session_id}}
-    )
-
-    # print("\n\nTHIS IS THE RESPONSE: ", response)
+    chain = series_bt_prompt | llm
+    response = chain.invoke({"requirements": requirements_text})
 
     if isinstance(response, dict) and "content" in response:
         return response["content"]
@@ -217,17 +180,9 @@ def generate_behavior_tree_from_series(row: "pd.Series", session_id: str = "defa
     return str(response)
 
 
-def generate_behavior_tree(description: str, session_id: str = "default") -> str:
-    chain_with_history = RunnableWithMessageHistory(
-        gen_bt_prompt | llm,
-        get_session_history,
-        input_messages_key="description",
-        history_messages_key="history",
-    )
-    response = chain_with_history.invoke(
-        {"description": description},
-        config={"configurable": {"session_id": session_id}}
-    )
+def generate_behavior_tree(description: str) -> str:
+    chain = gen_bt_prompt | llm
+    response = chain.invoke({"description": description})
     if isinstance(response, dict) and "content" in response:
         return response["content"]
     if hasattr(response, "content"):
@@ -235,35 +190,9 @@ def generate_behavior_tree(description: str, session_id: str = "default") -> str
     return str(response)
 
 
-def modify_behavior_tree(last_xml: str, instruction: str, session_id: str = "default") -> str:
-    chain_with_history = RunnableWithMessageHistory(
-        mod_bt_prompt | llm,
-        get_session_history,
-        input_messages_key="instruction",
-        history_messages_key="history",
-    )
-    response = chain_with_history.invoke(
-        {"last_xml": last_xml, "instruction": instruction},
-        config={"configurable": {"session_id": session_id}}
-    )
-    if isinstance(response, dict) and "content" in response:
-        return response["content"]
-    if hasattr(response, "content"):
-        return response.content
-    return str(response)
-
-
-def chat_reply(message: str, session_id: str = "default") -> str:
-    chain_with_history = RunnableWithMessageHistory(
-        chat_prompt | llm,
-        get_session_history,
-        input_messages_key="message",
-        history_messages_key="history",
-    )
-    response = chain_with_history.invoke(
-        {"message": message},
-        config={"configurable": {"session_id": session_id}}
-    )
+def modify_behavior_tree(last_xml: str, instruction: str) -> str:
+    chain = mod_bt_prompt | llm
+    response = chain.invoke({"last_xml": last_xml, "instruction": instruction})
     if isinstance(response, dict) and "content" in response:
         return response["content"]
     if hasattr(response, "content"):
